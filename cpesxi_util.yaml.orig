@@ -1,0 +1,7 @@
+deployment_vm01:
+  esxi_host: vm01.mydomain.com
+  esxi_username: cpesxi_util
+  esxi_password: PASSWORD_HERE
+  ups_host: ups01.mydomain.com
+  ups_snmpv1_community: public
+  initiate_shutdown_at_batt_pct_remaining: 40
