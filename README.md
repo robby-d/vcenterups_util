@@ -12,16 +12,6 @@ Simple script to trigger an ESXi server shutdown if a Cyberpower UPS registers a
 
 The below instructions are written for Ubuntu 18.04 LTS.
 
-### Install vSphere Command line tools
-
-### Install script dependencies
-```
-sudo apt-get install python3 python3-pip
-sudo pip3 install easysnmp
-```
-
-### (Optional) Create a new admin user on your ESXi server 
-
 ### Check out the project
 
 Check out `cpesxi_util` to your home directory (or anywhere else you see fit)
@@ -30,6 +20,33 @@ Check out `cpesxi_util` to your home directory (or anywhere else you see fit)
 cd
 git clone git@github.com:robby-dermody/cpesxi_util.git
 ```
+
+### Install vSphere CLI tools
+
+Download vSphere Linux x86_64 CLI utilities from [here](https://my.vmware.com/web/vmware/details?downloadGroup=VS-CLI-670&productId=742).
+
+Then:
+```
+tar -zxvf VMware-vSphere-CLI-*.x86_64.tar.gz
+sudo apt install -y build-essential perl-doc libmodule-build-perl libssl-dev libxml-libxml-perl libsoap-lite-perl libuuid-perl libcrypt-ssleay-perl libarchive-zip-perl libsocket6-perl libio-socket-inet6-perl libnet-inet6glue-perl
+sudo ./vmware-vsphere-cli-distrib/vmware-install.pl
+```
+
+Then, to fix a perl dependency issue, do the following:
+```
+sudo cpan
+install GAAS/libwww-perl-5.837.tar.gz
+exit
+```
+
+### Install other `cpesxi_util`  dependencies
+```
+sudo apt-get install git python3 python3-pip
+sudo apt-get install libsnmp-dev snmp-mibs-downloader
+sudo pip3 install easysnmp
+```
+
+### (Optional) Create a new admin user on your ESXi server 
 
 ### Copy the config file
 

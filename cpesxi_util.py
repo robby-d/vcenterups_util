@@ -25,6 +25,7 @@ ESXI_SHUTDOWN_MIN_REPEAT_PERIOD = 3600 # 1 hour
 #https://www.reddit.com/r/homelab/comments/5pdxwb/cyberpower_ups_and_grafana_now_with_snmp/
 CYBERPOWER_OID_BATTERY_TIME_LEFT_TICKS = "1.3.6.1.4.1.3808.1.1.1.2.2.4.0"
 CYBERPOWER_OID_BATTERY_CAPACITY_LEFT_PCT = "1.3.6.1.4.1.3808.1.1.1.2.2.1.0"
+CYBERPOWER_OID_CURRENT_INPUT_VOLTAGE = "1.3.6.1.4.1.3808.1.1.1.3.2.1.0"
 
 logger = None
 
@@ -93,12 +94,18 @@ def main():
         logger.debug("Reading power state from UPS @ {} (SNMP: {})".format(
             config[deployment]['ups_host'], config[deployment]['ups_snmpv1_community']))
         session = Session(hostname=config[deployment]['ups_host'], community=config[deployment]['ups_snmpv1_community'], version=1)
+        
+        ups_input_voltage = session.get('.' + CYBERPOWER_OID_CURRENT_INPUT_VOLTAGE)
+        ups_input_voltage = int(ups_input_voltage.value)
+        ups_is_discharging = not bool(ups_input_voltage)  # voltage is 0 when unit is discharging
+
         ups_ticks_left = session.get('.' + CYBERPOWER_OID_BATTERY_TIME_LEFT_TICKS)
         ups_min_left = int(ups_ticks_left.value) / 6000.0
         ups_pct_left = float(session.get('.' + CYBERPOWER_OID_BATTERY_CAPACITY_LEFT_PCT).value)
 
-        logger.info("UPS capacity has {}% remaining (> {}% allowed) ({} minutes runtime left)".format(
-                ups_pct_left, config[deployment]['initiate_shutdown_at_batt_pct_remaining'], ups_min_left))
+        logger.info("UPS capacity has {}% remaining (> {}% allowed) ({} minutes runtime left, UPS {} discharging)".format(
+                ups_pct_left, config[deployment]['initiate_shutdown_at_batt_pct_remaining'], ups_min_left,
+                "IS" if ups_is_discharging else "IS NOT"))
 
         now_epoch = int(time.time())
 
@@ -107,14 +114,18 @@ def main():
             last_shutdown = state[deployment]['shutdown-times'][-1]
             assert last_shutdown < now_epoch
             if now_epoch - last_shutdown < ESXI_SHUTDOWN_MIN_REPEAT_PERIOD:
-                logger.info("Skipping shutdown request, as the last one was made {} seconds ago".format(now_epoch - last_shutdown))
+                logger.info("Skipping shutdown request as the last one was made {} seconds ago".format(now_epoch - last_shutdown))
                 continue
 
-        # TODO: only allow shutdown if UPS is on battery power
+        # only allow shutdown if UPS is actively discharging
+        if not ups_is_discharging:
+            logger.info("Not making shutdown request: On AC power")
+            continue
 
         # check if we need to make a shutdown request
         if ups_pct_left > config[deployment]['initiate_shutdown_at_batt_pct_remaining']:
-            logger.info("Not making shutdown request")
+            logger.info("Not making shutdown request: On battery power, but levels are still above {}%".format(
+                config[deployment]['initiate_shutdown_at_batt_pct_remaining']))
             continue
 
         logger.info("SHUTDOWN {}INITIATED - UPS has {}% left is < {}% allowed".format(
