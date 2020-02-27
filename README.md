@@ -71,7 +71,7 @@ Edit `cpesxi_util.yaml` and set `initiate_shutdown_at_batt_pct_remaining`  to `1
 ### Set up cronjob
 
 Create a cronjob via `crontab -e` and insert the following text to run the script every minute:
-`* * * * * ~/cpesxi_util/cpesxi_util.py --debug`
+`* * * * * ~/cpesxi_util/cpesxi_util.py --debug 2>/dev/null`
 
 ### POWER DOWN TEST
 
