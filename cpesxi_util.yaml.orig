@@ -1,7 +1,10 @@
 deployment_vm01:
-  esxi_host: vm01.mydomain.com
-  esxi_username: cpesxi_util
-  esxi_password: PASSWORD_HERE
+  vcenter_host: vcenter01.vsphere.domain
+  vcenter_username: cpesxi_util@vsphere.domain
+  vcenter_password: PASSWORD_HERE
+  vcenter_vm_name: vcenter01
+  executing_host_vm_name: optional_vm_host_running_this_script
+  ups_type: tripplite
   ups_host: ups01.mydomain.com
   ups_snmpv1_community: public
   initiate_shutdown_at_batt_pct_remaining: 40
