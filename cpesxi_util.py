@@ -37,10 +37,8 @@ def get_vc_session(vc_hostname, username, password):
     except requests.exceptions.ConnectionError:
         logger.error("Error connecting to vCenter {}".format(vc_hostname))
         return False
-    #logger.debug(r.headers)
-    #logger.debug(r.request.headers)
     if r.status_code != 201:
-        logger.error("Got error status code {} from vcenter server: {}".format(r.status_code, r.text))
+        logger.error("Get vCenter session failed. Status code: {}, error: {}".format(r.status_code, r.text))
         return False
     logger.debug("Got vCenter session ID {}".format(r.headers['vmware-api-session-id']))
     s.headers.update({'vmware-api-session-id': r.headers['vmware-api-session-id']})
@@ -56,10 +54,10 @@ def get_vm_list(s, vc_hostname):
 
 def get_vm_poweredon_list(s, vc_hostname):
     '''Function to get all the VMs from vCenter inventory that are powered on'''
-    vm_query_params = {"power_states":["POWERED_ON"]}
+    vm_query_params = {"power_states": ["POWERED_ON"]}
     r = s.get("https://" + vc_hostname + "/api/vcenter/vm", params = vm_query_params)
     if r.status_code != 200:
-        logger.error("List VMs status_code: " + str(json_vm_list.status_code))
+        logger.error("Power on VM failed. Status code: {}, error: {}".format(r.status_code, r.text))
         return False
     return json.loads(r.text)
 
@@ -68,7 +66,7 @@ def guest_shutdown(s, vmid, vc_hostname):
     vm_action = {"action": "shutdown"}
     r = s.post("https://" + vc_hostname + "/api/vcenter/vm/" + vmid + "/guest/power", params = vm_action)
     if r.status_code != 200:
-        logger.error("Shutdown VM status_code: " + str(json_vm_list.status_code))
+        logger.error("Power off VM failed. Status code: {}, error: {}".format(r.status_code, r.text))
         return False
     return r
 
@@ -198,7 +196,7 @@ def do_vcenter_shutdown(deployment_config, is_dry_run):
     # now shut down vcenter
     logger.info("Shutting down vcenter server {} (dry run: {})...".format(vcenter_vm_list[0]['name'], is_dry_run))
     if not is_dry_run:
-        guest_shutdown(s, vm["vm"], deployment_config['vcenter_host'])    
+        guest_shutdown(s, vcenter_vm_list[0]['vm'], deployment_config['vcenter_host'])    
         #time.sleep(VCENTER_SHUTDOWN_WAIT_TIME_SECONDS) # wait a certain amount of time before assuming vcenter is shut down
 
     return True
@@ -271,7 +269,7 @@ def main() -> int:
         if state[deployment]['success'] and config[deployment]['executing_host_vm_name']:
             logger.info("Shutting down this system ({}) via shell command, in 1 minute (dry run: {})...".format(config[deployment]['executing_host_vm_name'], args.dry_run))
             if not args.dry_run:
-                cmd = "shutdown -P +1"  # schedule shutdown for 1 minute out
+                cmd = "sudo shutdown -P +1"  # schedule shutdown for 1 minute out
                 child = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=os.environ.copy())
                 stdout_and_stderr = child.communicate()[0].decode("utf-8")  # wait for call to finish
                 rc = child.returncode
