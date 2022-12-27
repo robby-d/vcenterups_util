@@ -10,23 +10,21 @@ Simple script to trigger an VMware vCenter deployment shutdown (i.e. of the vcen
 
 ## Installation
 
-The below instructions are written for Ubuntu 18.04 LTS.
+The below instructions are written for Ubuntu 22.04 LTS.
 
-### Check out the project
-
-Check out `cpesxi_util` to your home directory (or anywhere else you see fit)
+Install some base dependencies:
 
 ```
-cd
-git clone git@github.com:robby-dermody/cpesxi_util.git
+    sudo apt-get install -y python3-pip python3-venv
+    sudo apt-get install -y libsnmp-dev snmp-mibs-downloader
 ```
 
-### Install `cpesxi_util`  dependencies
+Create the virtual environment:
 
 ```
-sudo apt-get install git python3 python3-pip
-sudo apt-get install libsnmp-dev snmp-mibs-downloader
-sudo pip3 install easysnmp
+    git clone https://github.com/robby-dermody/cpesxi_util.git ~/cpesxi_util
+    python3 -m venv ~/cpesxi_util/env
+    ~/cpesxi_util/env/bin/pip3 install -U easysnmp pyyaml requests
 ```
 
 ### Create a role, user and mapping in vCenter
@@ -75,12 +73,12 @@ sudo bash -c "echo 'MY_USER ALL = (root) NOPASSWD: /usr/sbin/shutdown' > /etc/su
 
 ### DRY RUN TEST
 
-Edit `cpesxi_util.yaml` and set `initiate_shutdown_at_batt_pct_remaining`  to `100` temporarily to get the script to trigger when run. Test the script by running `~/cpesxi_util/cpesxi_util.py --debug --dry-run`. You should see it run and print out the ESXi server information to screen. Modify the `initiate_shutdown_at_batt_pct_remaining` value back to the desired value.
+Edit `cpesxi_util.yaml` and set `initiate_shutdown_at_batt_pct_remaining`  to `100` temporarily to get the script to trigger when run. Test the script by running `~/cpesxi_util/env/bin/python3 ~/cpesxi_util/cpesxi_util.py --debug --dry-run`. You should see it run and print out the ESXi server information to screen. Modify the `initiate_shutdown_at_batt_pct_remaining` value back to the desired value.
 
 ### Set up cronjob
 
 Create a cronjob via `crontab -e` and insert the following text to run the script every minute:
-`* * * * * ~/cpesxi_util/cpesxi_util.py --debug 2>/dev/null`
+`* * * * * ~/cpesxi_util/env/bin/python3 ~/cpesxi_util/cpesxi_util.py --debug 2>/dev/null`
 
 ### POWER DOWN TEST
 

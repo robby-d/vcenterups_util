@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
-shutdown ESXi if the 
+Simple script to trigger an VMware vCenter deployment shutdown (i.e. of the vcenter server vm and all vms it manages) if a Tripplite or Cyberpower UPS gets below a certain percentage battery remaining. 
 '''
 
 import os
@@ -13,12 +13,12 @@ import datetime
 import logging
 import logging.handlers
 import time
-import yaml
 import json
 import subprocess
-import requests
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
+import requests
+import yaml
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from easysnmp import Session
 
 PROG_NAME = "cpesxi_util"
