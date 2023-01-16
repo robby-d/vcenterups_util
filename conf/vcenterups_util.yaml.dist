@@ -1,0 +1,31 @@
+general:
+  check_period: 30
+
+deployments:
+  vm01:
+    #vcenter server IP/hostname
+    vcenter_host: vcenter01.vsphere.domain
+
+    #vcenter vcenterups user
+    vcenter_username: cpesxi_util@vsphere.domain
+
+    #vcenter vcenterups user pass
+    vcenter_password: PASSWORD_HERE
+
+    #The VM name of the vcenter server (e.g. vcenter, vcenter01, etc)
+    vcenter_vm_name: vcenter01
+
+    #If this script is running on a VM managed by this vcenter platform, put the name of that VM here
+    executing_host_vm_name: optional_vm_host_running_this_script
+
+    #UPS type, either "tripplite" or "cyberpower"
+    ups_type: tripplite
+
+    #UPS IP/hostname
+    ups_host: ups01.mydomain.com
+
+    #SNMP community (typically "public")
+    ups_snmpv1_community: public
+
+    #when the % UPS battery remaining gets to or under this level, the script will shutdown the vcenter deployment
+    initiate_shutdown_at_batt_pct_remaining: 40

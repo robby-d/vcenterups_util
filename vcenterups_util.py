@@ -21,7 +21,11 @@ import yaml
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 from easysnmp import Session
 
-PROG_NAME = "cpesxi_util"
+PROG_NAME = "vcenterups_util"
+CURDIR = os.path.dirname(os.path.realpath(__file__))
+STATE_FILE = os.path.join(CURDIR, "state", "{}.dat".format(PROG_NAME))
+CONF_FILE = os.path.join(CURDIR, "conf", "{}.yaml".format(PROG_NAME))
+LOG_FILE = os.path.join(CURDIR, "logs", "{}.log".format(PROG_NAME))
 ESXI_SHUTDOWN_MIN_REPEAT_PERIOD = 3600 # 1 hour
 
 logger = None
@@ -70,44 +74,48 @@ def guest_shutdown(s, vmid, vc_hostname):
         return False
     return r
 
-def get_program_dir():
-    return os.path.realpath(os.path.dirname(__file__))
-
 def set_up_logging(debug):
     LOG_MAX_SIZE = 1024 * 1024 * 2  # 2MB
     LOG_FORMAT = '%(asctime)s %(name)s %(levelname)s: %(message)s'
     LOG_NUM_ROTATIONS = 5
 
-    log_filename = "{}.log".format(PROG_NAME)
     logger = logging.getLogger()
-    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO, format=LOG_FORMAT)
+    logger.setLevel(logging.DEBUG if debug else logging.INFO)
     logging.getLogger("requests").setLevel(logging.WARNING)
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("easysnmp.interface").setLevel(logging.WARNING)
-    # Add the log message handler to the logger
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    logger.addHandler(stream_handler)
+
     logfile_handler = logging.handlers.RotatingFileHandler(
-        os.path.join(get_program_dir(), "logs", log_filename), maxBytes=LOG_MAX_SIZE, backupCount=LOG_NUM_ROTATIONS)
+        LOG_FILE, maxBytes=LOG_MAX_SIZE, backupCount=LOG_NUM_ROTATIONS)
     logfile_handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logger.addHandler(logfile_handler)
     return logger
 
 def load_config():
-    with open(os.path.join(get_program_dir(), "{}.yaml".format(PROG_NAME)), 'r') as ymlfile:
+    with open(CONF_FILE, 'r') as ymlfile:
         config = yaml.safe_load(ymlfile)
-    for section in config:
-        if not section.startswith('deployment_'):
-            logger.error("Invalid config section {}".format(section))
-            return False
-        #required fields
-        for p in ('vcenter_host', 'vcenter_username', 'vcenter_password', 'vcenter_vm_name',
-                  'ups_type', 'ups_host', 'ups_snmpv1_community', 'initiate_shutdown_at_batt_pct_remaining'):
-            if p not in config[section] or not config[section][p]:
-                logger.error("Missing or empty property '{}'".format(p))
+
+        if 'general' not in config or 'check_period' not in config['general']:
+                logger.error("Missing 'general' config section or 'check_period' param in the 'general' section")
                 return False
-        if 'executing_host_vm_name' not in config[section]:
-            config[section]['executing_host_vm_name'] = ''
-        
-        assert config[section]['ups_type'] in ('tripplite', 'cyberpower')
+        if 'deployments' not in config:
+                logger.error("Missing 'deployments' config section")
+                return False
+        for deployment in config['deployments']:
+            #required fields
+            for p in ('vcenter_host', 'vcenter_username', 'vcenter_password', 'vcenter_vm_name',
+                    'ups_type', 'ups_host', 'ups_snmpv1_community', 'initiate_shutdown_at_batt_pct_remaining'):
+                if p not in config['deployments'][deployment] or not config['deployments'][deployment][p]:
+                    logger.error("Missing or empty property '{}'".format(p))
+                    return False
+            if 'executing_host_vm_name' not in config['deployments'][deployment]:
+                config['deployments'][deployment]['executing_host_vm_name'] = ''
+
+            assert config['deployments'][deployment]['ups_type'] in ('tripplite', 'cyberpower')
     return config
 
 def get_ups_stats(deployment_config):
@@ -216,71 +224,83 @@ def main() -> int:
         sys.exit(1)
 
     # load state
-    state_file_path = os.path.join(get_program_dir(), "{}.state".format(PROG_NAME))
-    if os.path.exists(state_file_path):
-        with open(state_file_path, 'r') as f:
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, 'r') as f:
             state = json.load(f)
     else:
         state = {}
 
-    # for each UPS-vcenter deployment combo...
-    for deployment in config:
-        logger.info("Processing {}".format(deployment))
-        state.setdefault(deployment, {'success': None})
-        state[deployment].setdefault('shutdown-times', [])
-            
-        ups_stats = get_ups_stats(config[deployment])
+    restarting_this_host_result = None
+    logger.info("----- {} STARTUP -----".format(PROG_NAME))
+    while True:
+        # for each UPS-vcenter deployment combo...
+        for deployment in config['deployments']:
+            logger.info("Processing deployment '{}'".format(deployment))
+            state.setdefault(deployment, {'last_shutdown_result': None})
+            state[deployment].setdefault('shutdown_times', [])
+            deployment_config = config['deployments'][deployment]
 
-        logger.info("UPS capacity has {}% remaining (> {}% allowed) ({} minutes runtime left, UPS {} discharging)".format(
-                ups_stats['ups_pct_left'], config[deployment]['initiate_shutdown_at_batt_pct_remaining'], ups_stats['ups_min_left'],
-                "IS" if ups_stats['ups_is_discharging'] else "IS NOT"))
+            ups_stats = get_ups_stats(deployment_config)
+            logger.info("UPS capacity has {}% remaining (> {}% allowed) ({} minutes runtime left, UPS {} discharging)".format(
+                    ups_stats['ups_pct_left'], deployment_config['initiate_shutdown_at_batt_pct_remaining'], ups_stats['ups_min_left'],
+                    "IS" if ups_stats['ups_is_discharging'] else "IS NOT"))
 
-        now_epoch = int(time.time())
+            now_epoch = int(time.time())
 
-        # skip making a shutdown request if we have recently made one
-        if len(state[deployment]['shutdown-times']):
-            last_shutdown = state[deployment]['shutdown-times'][-1]
-            assert last_shutdown < now_epoch
-            if not args.dry_run and now_epoch - last_shutdown < ESXI_SHUTDOWN_MIN_REPEAT_PERIOD:
-                logger.info("Skipping shutdown request as the last one was made {} seconds ago".format(now_epoch - last_shutdown))
+            # skip making a shutdown request if we have recently made one
+            if len(state[deployment]['shutdown_times']):
+                last_shutdown = state[deployment]['shutdown_times'][-1]
+                assert last_shutdown < now_epoch
+                if not args.dry_run and now_epoch - last_shutdown < ESXI_SHUTDOWN_MIN_REPEAT_PERIOD:
+                    logger.info("Skipping shutdown request as the last one was made {} seconds ago".format(now_epoch - last_shutdown))
+                    continue
+
+            # only allow shutdown if UPS is actively discharging
+            if not args.dry_run and not ups_stats['ups_is_discharging']:
+                logger.info("Not making shutdown request: On AC power")
                 continue
 
-        # only allow shutdown if UPS is actively discharging
-        if not args.dry_run and not ups_stats['ups_is_discharging']:
-            logger.info("Not making shutdown request: On AC power")
-            continue
+            # check if we need to make a shutdown request
+            if ups_stats['ups_pct_left'] > deployment_config['initiate_shutdown_at_batt_pct_remaining']:
+                logger.info("Not making shutdown request: On battery power, but levels are still above {}%".format(
+                    deployment_config['initiate_shutdown_at_batt_pct_remaining']))
+                continue
 
-        # check if we need to make a shutdown request
-        if ups_stats['ups_pct_left'] > config[deployment]['initiate_shutdown_at_batt_pct_remaining']:
-            logger.info("Not making shutdown request: On battery power, but levels are still above {}%".format(
-                config[deployment]['initiate_shutdown_at_batt_pct_remaining']))
-            continue
+            logger.info("SHUTDOWN {}INITIATED - UPS has {}% left is < {}% allowed".format(
+                'DRY RUN ' if args.dry_run else '', ups_stats['ups_pct_left'], deployment_config['initiate_shutdown_at_batt_pct_remaining']))
 
-        logger.info("SHUTDOWN {}INITIATED - UPS has {}% left is < {}% allowed".format(
-            'DRY RUN ' if args.dry_run else '', ups_stats['ups_pct_left'], config[deployment]['initiate_shutdown_at_batt_pct_remaining']))
+            state[deployment]['shutdown_times'].append(now_epoch)  # log this time as a shutdown
 
-        state[deployment]['shutdown-times'].append(now_epoch)  # log this time as a shutdown
+            # shut down the vcenter environment
+            state[deployment]['last_shutdown_result'] = do_vcenter_shutdown(deployment_config, args.dry_run)
 
-        # shut down the vcenter environment
-        state[deployment]['success'] = do_vcenter_shutdown(config[deployment], args.dry_run)
+            # if this script is running on a VM in this vcenter deployment that is shutting down,
+            # we will need to shut down this system via shell command, as vcenter is already down (or shutting down)
+            if state[deployment]['last_shutdown_result'] and deployment_config['executing_host_vm_name']:
+                logger.info("Shutting down this system ({}) via shell command, in 1 minute (dry run: {})...".format(
+                    deployment_config['executing_host_vm_name'], args.dry_run))
+                if not args.dry_run:
+                    cmd = "sudo shutdown -P +1"  # schedule shutdown for 1 minute out
+                    child = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=os.environ.copy())
+                    stdout_and_stderr = child.communicate()[0].decode("utf-8")  # wait for call to finish
+                    rc = child.returncode
+                    if rc != 0:
+                        logger.info("Invalid response from shutdown: {}".format(stdout_and_stderr))
+                        state[deployment]['last_shutdown_result']  = False
+                        restarting_this_host_result = False
+                    else:
+                        restarting_this_host_result = True
+                else:
+                    restarting_this_host_result = True
 
-        # if this script is running on a VM in this vcenter deployment that is shutting down,
-        # we will need to shut down this system via shell command, as vcenter is already down (or shutting down)
-        if state[deployment]['success'] and config[deployment]['executing_host_vm_name']:
-            logger.info("Shutting down this system ({}) via shell command, in 1 minute (dry run: {})...".format(config[deployment]['executing_host_vm_name'], args.dry_run))
-            if not args.dry_run:
-                cmd = "sudo shutdown -P +1"  # schedule shutdown for 1 minute out
-                child = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=os.environ.copy())
-                stdout_and_stderr = child.communicate()[0].decode("utf-8")  # wait for call to finish
-                rc = child.returncode
-                if rc != 0:
-                    logger.info("Invalid response from shutdown: {}".format(stdout_and_stderr))
-                    state[deployment]['success']  = False
-    
-    with open(state_file_path, 'w') as f:
-        json.dump(state, f)
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f)
 
-    return all([deployment['success'] in (True, None) for deployment in state.values()])
+        if restarting_this_host_result is not None:
+            return restarting_this_host_result
+
+        logger.info("Waiting {} seconds until checking again...".format(config['general']['check_period']))
+        time.sleep(config['general']['check_period'])
     
 
 
