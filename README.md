@@ -42,7 +42,7 @@ Then under Administration -> Users and Groups, create a new user named `vcenteru
 Finally, under Administration -> Global Permissions, add a mapping entry for `vcenterups_user` to assign it the `vcenterups Users` role. Make sure `Propagate to children` is checked.
 
 
-### Copy the config file
+### Set up configuration
 
 Copy the `conf/vcenterups_util.yaml.orig` configuration file template to `conf/vcenterups_util.yaml` and modify as necessary. Multiple deployment sections can be added to support multiple vcenter system/UPS combinations.
 
@@ -66,3 +66,29 @@ Edit `vcenterups_util.yaml` and set `initiate_shutdown_at_batt_pct_remaining`  t
 
 Unplug the UPS and run `tail -f logs/vcenterups_util.log`. You should see the script run every minute. When the percent battery remaining reaches the value you set for `initiate_shutdown_at_batt_pct_remaining` in your config, you should see it command your ESXi server to shutdown all VMs and shut itself down.
 
+### Set up to run on startup
+
+You can have the `vcenterups_util` daemon start on startup via running the following command:
+
+```
+sudo tee "/etc/systemd/system/vcenterups_util.service" > /dev/null <<EOF
+[Unit]
+Description=vcenterups_util
+
+[Service]
+ExecStart=/opt/vcenterups_util/env/bin/python3/opt/vcenterups_util/vcenterups_util.py
+User=`id -un`
+Group=`id -gn`
+Restart=on-failure
+RestartSec=30s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+Followed by:
+```
+sudo systemctl enable vcenterups_util
+sudo systemctl start vcenterups_util
+```

@@ -7,7 +7,7 @@ deployments:
     vcenter_host: vcenter01.vsphere.domain
 
     #vcenter vcenterups user
-    vcenter_username: cpesxi_util@vsphere.domain
+    vcenter_username: vcenterups_util@vsphere.domain
 
     #vcenter vcenterups user pass
     vcenter_password: PASSWORD_HERE
