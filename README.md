@@ -76,7 +76,7 @@ sudo tee "/etc/systemd/system/vcenterups_util.service" > /dev/null <<EOF
 Description=vcenterups_util
 
 [Service]
-ExecStart=/opt/vcenterups_util/env/bin/python3/opt/vcenterups_util/vcenterups_util.py
+ExecStart=/opt/vcenterups_util/env/bin/python3 /opt/vcenterups_util/vcenterups_util.py
 User=`id -un`
 Group=`id -gn`
 Restart=on-failure
