@@ -41,7 +41,7 @@ def get_vc_session(vc_hostname, username, password):
     except requests.exceptions.ConnectionError:
         logger.error("Error connecting to vCenter {}".format(vc_hostname))
         return False
-    if r.status_code != 201:
+    if not r.ok:
         logger.error("Get vCenter session failed. Status code: {}, error: {}".format(r.status_code, r.text))
         return False
     logger.debug("Got vCenter session ID {}".format(r.headers['vmware-api-session-id']))
@@ -51,7 +51,7 @@ def get_vc_session(vc_hostname, username, password):
 def get_vm_list(s, vc_hostname):
     '''Function to get all the VMs from vCenter inventory'''   
     r = s.get("https://" + vc_hostname + "/api/vcenter/vm")
-    if r.status_code != 200:
+    if not r.ok:
         logger.error("List VMs failed. Status code: {}, error: {}".format(r.status_code, r.text))
         return False
     return json.loads(r.text)
@@ -60,7 +60,7 @@ def get_vm_poweredon_list(s, vc_hostname):
     '''Function to get all the VMs from vCenter inventory that are powered on'''
     vm_query_params = {"power_states": ["POWERED_ON"]}
     r = s.get("https://" + vc_hostname + "/api/vcenter/vm", params = vm_query_params)
-    if r.status_code != 200:
+    if not r.ok:
         logger.error("Power on VM failed. Status code: {}, error: {}".format(r.status_code, r.text))
         return False
     return json.loads(r.text)
@@ -69,10 +69,10 @@ def guest_shutdown(s, vmid, vc_hostname):
     '''Shut down guest VM'''
     vm_action = {"action": "shutdown"}
     r = s.post("https://" + vc_hostname + "/api/vcenter/vm/" + vmid + "/guest/power", params = vm_action)
-    if r.status_code != 200:
+    if not r.ok:
         logger.error("Power off VM failed. Status code: {}, error: {}".format(r.status_code, r.text))
         return False
-    return r
+    return True
 
 def set_up_logging(debug):
     LOG_MAX_SIZE = 1024 * 1024 * 2  # 2MB
