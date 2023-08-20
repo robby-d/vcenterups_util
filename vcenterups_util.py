@@ -74,10 +74,18 @@ def guest_shutdown(s, vmid, vc_hostname):
         return False
     return True
 
+def log_unhandled_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):  #Will call default excepthook
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    #Otherwise, create a critical level log message with info from the except hook...
+    logger.critical("Unhandled exception", exc_info=(exc_type, exc_value, exc_traceback))
+
 def set_up_logging(debug):
     LOG_MAX_SIZE = 1024 * 1024 * 2  # 2MB
     LOG_FORMAT = '%(asctime)s %(name)s %(levelname)s: %(message)s'
-    LOG_NUM_ROTATIONS = 5
+    LOG_NUM_ROTATIONS = 10
 
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG if debug else logging.INFO)
@@ -93,6 +101,10 @@ def set_up_logging(debug):
         LOG_FILE, maxBytes=LOG_MAX_SIZE, backupCount=LOG_NUM_ROTATIONS)
     logfile_handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logger.addHandler(logfile_handler)
+
+    #Log unhandled exceptions
+    sys.excepthook = log_unhandled_exception
+
     return logger
 
 def load_config():
@@ -117,6 +129,18 @@ def load_config():
 
             assert config['deployments'][deployment]['ups_type'] in ('tripplite', 'cyberpower')
     return config
+
+def load_state():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, 'r') as f:
+            state = json.load(f)
+    else:
+        state = {}
+    return state
+
+def dump_state(state):
+    with open(STATE_FILE, 'w') as f:
+        json.dump(state, f)
 
 def get_ups_stats(deployment_config):
     # Triplite OIDs, from: https://assets.tripplite.com/flyer/supported-snmp-oids-technical-application-bulletin-en.pdf
@@ -173,8 +197,8 @@ def do_vcenter_shutdown(deployment_config, is_dry_run):
         logger.error("Cannot find vcenter server named {}".format(deployment_config['vcenter_vm_name']))
     
     # Reorder the list with the vcenter server last, leaving out the vm host executing this script (if there is one), which will be shutdown via shell command
-    vm_list_to_shutdown = filtered_vm_list + vcenter_vm_list  # leave out executing vm host
-    logger.info("Shutting down the following VMs: {}".format(', '.join([vm['name'] for vm in vm_list_to_shutdown])))
+    logger.info("Shutting down the following VMs first: {}".format(', '.join([vm['name'] for vm in filtered_vm_list])))
+    logger.info("Then, shutting down the vcenter server '{}'".format(vcenter_vm_list[0]['name']))
 
     # shut down non-vcenter vms first
     for vm in filtered_vm_list:
@@ -200,15 +224,15 @@ def do_vcenter_shutdown(deployment_config, is_dry_run):
         else:
             logger.error("Did not finish VM shutdowns in the allowed time, aborting.")
             return False
+    logger.info("Shutdown of all {} non-vcenter VMs is complete.".format(len(filtered_vm_list)))
 
-    # now shut down vcenter
-    logger.info("Shutting down vcenter server {} (dry run: {})...".format(vcenter_vm_list[0]['name'], is_dry_run))
+    # now shut down vcenter. We can't poll this obviously as we are shutting down the thing we'd be polling
+    logger.info("Shutting down vcenter server '{}' (dry run: {})...".format(vcenter_vm_list[0]['name'], is_dry_run))
     if not is_dry_run:
         guest_shutdown(s, vcenter_vm_list[0]['vm'], deployment_config['vcenter_host'])    
         #time.sleep(VCENTER_SHUTDOWN_WAIT_TIME_SECONDS) # wait a certain amount of time before assuming vcenter is shut down
 
     return True
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
@@ -223,12 +247,7 @@ def main() -> int:
         logger.error("Could not load config")
         sys.exit(1)
 
-    # load state
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, 'r') as f:
-            state = json.load(f)
-    else:
-        state = {}
+    state = load_state()
 
     restarting_this_host_result = None
     logger.info("----- {} STARTUP -----".format(PROG_NAME))
@@ -273,6 +292,8 @@ def main() -> int:
 
             # shut down the vcenter environment
             state[deployment]['last_shutdown_result'] = do_vcenter_shutdown(deployment_config, args.dry_run)
+            logger.debug("VM shutdown result: {}, executing_host_vm_name: {}".format(
+                state[deployment]['last_shutdown_result'], deployment_config['executing_host_vm_name']))
 
             # if this script is running on a VM in this vcenter deployment that is shutting down,
             # we will need to shut down this system via shell command, as vcenter is already down (or shutting down)
@@ -293,8 +314,7 @@ def main() -> int:
                 else:
                     restarting_this_host_result = True
 
-        with open(STATE_FILE, 'w') as f:
-            json.dump(state, f)
+        dump_state(state)
 
         if restarting_this_host_result is not None:
             return restarting_this_host_result
@@ -302,7 +322,6 @@ def main() -> int:
         logger.info("Waiting {} seconds until checking again...".format(config['general']['check_period']))
         time.sleep(config['general']['check_period'])
     
-
 
 if __name__ == "__main__":
     sys.exit(0 if main() == True else 1)
